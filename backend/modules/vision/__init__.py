@@ -94,6 +94,8 @@ class VisionManager:
             face_result["ear_left"], face_result["ear_right"],
             head_pose=pose_result["head"] if pose_result["head"]["available"] else None,
             body_pose=pose_result["body"] if pose_result["body"]["available"] else None,
+            face_rect=face_result["face_rect"],
+            frame_shape=preprocessed.shape,
         )
 
         return {
@@ -196,12 +198,12 @@ class VisionManager:
             face_height_ratio = fh / h
             face_center_x = (fx + fw / 2) / w
 
-            if face_center_y > 0.7 and face_height_ratio > 0.35:
+            if face_center_y > 0.8 and face_height_ratio > 0.45:
                 label, score = "趴桌", 10
-            elif face_center_y > 0.6 and face_height_ratio > 0.25:
-                label, score = "前倾", 50
-            elif abs(face_center_x - 0.5) > 0.25:
-                label, score = "前倾", 60
+            elif face_center_y > 0.7 and face_height_ratio > 0.35:
+                label, score = "前倾", 70
+            elif abs(face_center_x - 0.5) > 0.3:
+                label, score = "前倾", 70
             else:
                 label, score = "正常", 100
 
@@ -219,9 +221,9 @@ class VisionManager:
     @staticmethod
     def _score_to_color(score: float) -> str:
         """专注度分数转颜色"""
-        if score >= 75:
+        if score >= 65:
             return "#67C23A"
-        elif score >= 50:
+        elif score >= 45:
             return "#E6A23C"
         elif score >= 25:
             return "#FF9D4D"

@@ -29,7 +29,7 @@ class VoiceManager:
 
         try:
             if _WHISPER_AVAILABLE:
-                self.asr = ASRWhisper()
+                self.asr = ASRWhisper(model_name="base")
         except Exception as e:
             logger.warning(f"ASR初始化失败: {e}")
 

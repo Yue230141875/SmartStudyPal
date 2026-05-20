@@ -39,7 +39,24 @@ class AmiyaTTS:
         "博士，我在": None,
         "博士，你好": None,
         "欢迎回来，博士": None,
+        "怎么了，博士": None,
+        "好的": None,
+        "博士，一起加油吧": None,
+        "博士，今天也要全力以赴哦": None,
+        "我相信博士一定能做到的": None,
+        "博士，专注当下，不要分心": None,
+        "每一次努力都不会白费的，博士": None,
+        "博士，休息好了再继续吧": None,
     }
+
+    ENCOURAGEMENT_TEXTS = [
+        "博士，一起加油吧",
+        "博士，今天也要全力以赴哦",
+        "我相信博士一定能做到的",
+        "博士，专注当下，不要分心",
+        "每一次努力都不会白费的，博士",
+        "博士，休息好了再继续吧",
+    ]
 
     AMIYA_STYLE = """
 角色：明日方舟阿米娅，罗德岛的公开领袖，温柔而坚定的少女。
@@ -149,6 +166,17 @@ class AmiyaTTS:
         if cached and cached.exists():
             return f"/api/voice/amiya/audio/{cached.name}"
         return None
+
+    def get_random_encouragement(self) -> Optional[dict]:
+        import random
+        available = []
+        for text in self.ENCOURAGEMENT_TEXTS:
+            url = self.get_audio_url(text)
+            if url:
+                available.append({"text": text, "audio_url": url})
+        if not available:
+            return None
+        return random.choice(available)
 
     def synthesize(self, text: str, force_synthesize: bool = False) -> dict:
         text = text.strip()

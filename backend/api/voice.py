@@ -66,7 +66,22 @@ async def speech_to_text(audio: UploadFile = File(...), language: str = Query("z
         if not vm.asr:
             return {"success": False, "message": "ASR引擎不可用"}
 
-        result = vm.asr.transcribe_audio_bytes(contents, language=language)
+        import tempfile, os, uuid
+        from pathlib import Path
+        tmp_dir = Path(tempfile.gettempdir()) / "smartstudypal_asr"
+        tmp_dir.mkdir(exist_ok=True)
+        suffix = Path(audio.filename or "audio.wav").suffix or ".wav"
+        tmp_path = tmp_dir / f"asr_{uuid.uuid4().hex[:8]}{suffix}"
+        with open(tmp_path, "wb") as f:
+            f.write(contents)
+
+        result = vm.asr.transcribe(str(tmp_path), language=language)
+
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
         return {"success": True, "data": result}
     except Exception as e:
         logger.error(f"语音识别失败: {e}")
@@ -193,6 +208,20 @@ async def get_amiya_ready_audio(text: str = Query("博士，我在")):
             if audio_url:
                 return {"success": True, "data": {"audio_url": audio_url, "cached": True}}
         return {"success": False, "data": {"cached": False, "message": "音频未预合成"}}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@router.get("/amiya/encouragement")
+async def get_amiya_encouragement():
+    """随机获取阿米娅鼓励学习语音"""
+    try:
+        vm = get_voice_manager()
+        if vm.amiya_tts:
+            result = vm.amiya_tts.get_random_encouragement()
+            if result:
+                return {"success": True, "data": result}
+        return {"success": False, "message": "鼓励语音未就绪"}
     except Exception as e:
         return {"success": False, "message": str(e)}
 

@@ -1,9 +1,21 @@
 import logging
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+if not shutil.which("ffmpeg"):
+    _ffmpeg_candidates = [
+        Path(r"D:\Vibe_Coidng\StudyRoom\ffmpeg.exe"),
+        Path(r"D:\AiTool\ffmpeg\bin\ffmpeg.exe"),
+    ]
+    for _fc in _ffmpeg_candidates:
+        if _fc.exists():
+            os.environ["PATH"] = str(_fc.parent) + os.pathsep + os.environ.get("PATH", "")
+            logger.info(f"已添加 ffmpeg 路径: {_fc.parent}")
+            break
 
 try:
     import whisper
@@ -11,6 +23,13 @@ try:
 except ImportError:
     _WHISPER_AVAILABLE = False
     logger.warning("whisper 未安装，语音识别功能不可用。请执行: pip install openai-whisper")
+
+try:
+    from pypinyin import lazy_pinyin, Style
+    _PYPINYIN_AVAILABLE = True
+except ImportError:
+    _PYPINYIN_AVAILABLE = False
+    logger.warning("pypinyin 未安装，拼音模糊匹配不可用。请执行: pip install pypinyin")
 
 
 class ASRWhisper:
@@ -49,8 +68,14 @@ class ASRWhisper:
                 confidence = max(0, min(1, (avg_logprob + 1) / 1))
                 duration = segments[-1].get("end", 0) - segments[0].get("start", 0)
 
+            pinyin_str = ""
+            if _PYPINYIN_AVAILABLE and text:
+                pinyin_list = lazy_pinyin(text, style=Style.NORMAL)
+                pinyin_str = "".join(pinyin_list)
+
             return {
                 "text": text,
+                "pinyin": pinyin_str,
                 "confidence": round(confidence, 3),
                 "language": result.get("language", language),
                 "duration": round(duration, 2),

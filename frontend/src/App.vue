@@ -52,10 +52,22 @@
     </div>
 
     <!-- 阿米娅角色 -->
-    <div class="desk-character" @click="onCharacterClick" :class="{ 'character-active': characterClicked }">
+    <div
+      class="desk-character"
+      :class="{ 'character-active': characterClicked, 'character-listening': isListening }"
+      @mousedown="onAmiyaPointerDown"
+      @touchstart.prevent="onAmiyaPointerDown"
+      @touchend="onAmiyaPointerUp"
+      @touchcancel="onAmiyaPointerCancel"
+      @contextmenu.prevent
+    >
       <div class="desk-character-inner">
         <img :src="amiyaImg" alt="amiya" class="character-img" draggable="false" />
         <div class="character-shadow"></div>
+        <div v-if="isListening || isProcessing" class="listening-indicator">
+          <span class="listening-dot" v-if="isListening"></span>
+          <span class="listening-text">{{ isProcessing ? '识别中...' : (listeningText || '聆听中...') }}</span>
+        </div>
       </div>
     </div>
 
@@ -82,7 +94,7 @@
           <button class="widget-close" @click="closeWidget">✕</button>
         </div>
         <div class="widget-content">
-          <component :is="activeWidget.component" />
+          <component :is="activeWidget.component" ref="widgetRef" />
         </div>
       </div>
     </div>
@@ -92,9 +104,8 @@
 <script setup>
 import { ref, shallowRef, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
-import { amiyaSpeak, getAmiyaReadyAudio } from './api/voice'
-import FocusView from './views/FocusView.vue'
-import PomodoroView from './views/PomodoroView.vue'
+import { amiyaSpeak, getAmiyaReadyAudio, speechToText } from './api/voice'
+import StudySession from './components/StudySession.vue'
 import DashboardView from './views/DashboardView.vue'
 import deskBgImg from './assets/desk.png'
 import amiyaImgSrc from './assets/amiya.png'
@@ -111,6 +122,24 @@ const currentTime = ref('')
 const currentDate = ref('')
 let clockTimer = null
 
+const preloadedAudio = ref(null)
+const preloadedLongPressAudio = ref(null)
+const preloadedOkAudio = ref(null)
+let preloadPromise = null
+
+const isListening = ref(false)
+const listeningText = ref('')
+const isProcessing = ref(false)
+const widgetRef = ref(null)
+let longPressTimer = null
+let isLongPress = false
+let mediaStream = null
+let audioContext = null
+let gainNode = null
+let scriptNode = null
+let recordedSamples = []
+const LONG_PRESS_MS = 500
+
 function updateClock() {
   const now = new Date()
   currentTime.value = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -120,22 +149,415 @@ function updateClock() {
 updateClock()
 clockTimer = setInterval(updateClock, 1000)
 
+async function preloadAmiyaAudio() {
+  try {
+    const texts = [
+      { text: '博士，我在', store: (a) => { preloadedAudio.value = a } },
+      { text: '怎么了，博士', store: (a) => { preloadedLongPressAudio.value = a } },
+      { text: '好的', store: (a) => { preloadedOkAudio.value = a } },
+    ]
+    for (const item of texts) {
+      try {
+        let audioUrl = null
+        try {
+          const readyRes = await getAmiyaReadyAudio(item.text)
+          if (readyRes.success && readyRes.data?.audio_url) {
+            audioUrl = readyRes.data.audio_url
+          }
+        } catch { /* ready未命中 */ }
+        if (!audioUrl) {
+          try {
+            const res = await amiyaSpeak(item.text, true)
+            if (res.success && res.data?.audio_url) {
+              audioUrl = res.data.audio_url
+            }
+          } catch (e2) {
+            console.warn(`合成失败: ${item.text}`, e2.message)
+          }
+        }
+        if (audioUrl) {
+          const audio = new Audio(audioUrl)
+          audio.volume = volumePercent.value / 100
+          audio.preload = 'auto'
+          item.store(audio)
+          console.log(`预加载成功: ${item.text}`)
+        }
+      } catch (e) {
+        console.warn(`预加载失败: ${item.text}`, e.message)
+      }
+    }
+  } catch (e) {
+    console.warn('阿米娅语音预加载失败:', e.message)
+  }
+}
+
+preloadPromise = preloadAmiyaAudio()
+
+function playAudio(url) {
+  return new Promise((resolve, reject) => {
+    const audio = new Audio(url)
+    audio.volume = volumePercent.value / 100
+    audio.onended = () => resolve()
+    audio.onerror = (e) => reject(e)
+    audio.play().catch(reject)
+  })
+}
+
+async function playPreloaded(preloadedRef) {
+  if (preloadedRef.value) {
+    try {
+      const player = preloadedRef.value.cloneNode(true)
+      player.volume = volumePercent.value / 100
+      player.onended = () => {}
+      player.onerror = () => {}
+      await player.play()
+      return true
+    } catch (e) {
+      console.warn('预加载音频播放失败:', e.message)
+    }
+  }
+  return false
+}
+
+async function fetchAndPlay(text) {
+  let audioUrl = null
+  try {
+    const readyRes = await getAmiyaReadyAudio(text)
+    if (readyRes.success && readyRes.data?.audio_url) {
+      audioUrl = readyRes.data.audio_url
+    }
+  } catch { /* ready未命中，继续尝试合成 */ }
+  if (!audioUrl) {
+    try {
+      const res = await amiyaSpeak(text, true)
+      if (res.success && res.data?.audio_url) {
+        audioUrl = res.data.audio_url
+      }
+    } catch (e) {
+      console.warn('合成语音失败:', e.message)
+    }
+  }
+  if (audioUrl) {
+    await playAudio(audioUrl)
+  }
+}
+
+let docMouseUpHandler = null
+
+function onAmiyaPointerDown() {
+  isLongPress = false
+  longPressTimer = setTimeout(() => {
+    isLongPress = true
+    onLongPressStart()
+  }, LONG_PRESS_MS)
+
+  docMouseUpHandler = () => {
+    onAmiyaPointerUp()
+    document.removeEventListener('mouseup', docMouseUpHandler)
+    docMouseUpHandler = null
+  }
+  document.addEventListener('mouseup', docMouseUpHandler)
+}
+
+function onAmiyaPointerUp() {
+  clearTimeout(longPressTimer)
+  if (isLongPress) {
+    onLongPressEnd()
+  } else {
+    onShortPress()
+  }
+}
+
+function onAmiyaPointerCancel() {
+  clearTimeout(longPressTimer)
+  if (docMouseUpHandler) {
+    document.removeEventListener('mouseup', docMouseUpHandler)
+    docMouseUpHandler = null
+  }
+  if (isLongPress) {
+    onLongPressEnd()
+  }
+  isLongPress = false
+}
+
+async function onShortPress() {
+  characterClicked.value = true
+  setTimeout(() => { characterClicked.value = false }, 600)
+
+  try {
+    if (await playPreloaded(preloadedAudio)) return
+    await preloadPromise
+    if (await playPreloaded(preloadedAudio)) return
+    await fetchAndPlay('博士，我在')
+  } catch (error) {
+    console.error('阿米娅语音播放失败:', error)
+  }
+}
+
+async function onLongPressStart() {
+  characterClicked.value = true
+  setTimeout(() => { characterClicked.value = false }, 600)
+
+  isListening.value = true
+  isProcessing.value = false
+  listeningText.value = '启动麦克风...'
+
+  playPreloaded(preloadedLongPressAudio).catch(() => {
+    fetchAndPlay('怎么了，博士').catch(() => {})
+  })
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 16000,
+      }
+    })
+
+    audioContext = new AudioContext({ sampleRate: 16000 })
+    const source = audioContext.createMediaStreamSource(mediaStream)
+
+    gainNode = audioContext.createGain()
+    gainNode.gain.value = 3.0
+
+    const compressor = audioContext.createDynamicsCompressor()
+    compressor.threshold.value = -30
+    compressor.knee.value = 20
+    compressor.ratio.value = 8
+    compressor.attack.value = 0.003
+    compressor.release.value = 0.1
+
+    scriptNode = audioContext.createScriptProcessor(4096, 1, 1)
+    recordedSamples = []
+
+    scriptNode.onaudioprocess = (e) => {
+      const inputData = e.inputBuffer.getChannelData(0)
+      recordedSamples.push(new Float32Array(inputData))
+    }
+
+    source.connect(gainNode)
+    gainNode.connect(compressor)
+    compressor.connect(scriptNode)
+    scriptNode.connect(audioContext.destination)
+
+    listeningText.value = '聆听中...'
+  } catch (e) {
+    console.warn('麦克风启动失败:', e)
+    if (e.name === 'NotAllowedError') {
+      listeningText.value = '请允许麦克风权限'
+    } else if (e.name === 'NotFoundError') {
+      listeningText.value = '未检测到麦克风'
+    } else {
+      listeningText.value = '麦克风启动失败'
+    }
+    setTimeout(() => {
+      isListening.value = false
+      listeningText.value = ''
+    }, 2000)
+  }
+}
+
+function onLongPressEnd() {
+  isLongPress = false
+
+  if (scriptNode) {
+    scriptNode.disconnect()
+    scriptNode = null
+  }
+
+  if (!mediaStream || recordedSamples.length === 0) {
+    isListening.value = false
+    isProcessing.value = false
+    listeningText.value = ''
+    cleanupAudioResources()
+    return
+  }
+
+  isListening.value = false
+  isProcessing.value = true
+  listeningText.value = '识别中...'
+
+  const allSamples = concatFloat32Arrays(recordedSamples)
+  recordedSamples = []
+
+  cleanupAudioResources()
+
+  const wavBlob = encodeWAV(allSamples, 16000)
+
+  processWithBackendASR(wavBlob)
+}
+
+function concatFloat32Arrays(arrays) {
+  let totalLength = 0
+  for (const arr of arrays) totalLength += arr.length
+  const result = new Float32Array(totalLength)
+  let offset = 0
+  for (const arr of arrays) {
+    result.set(arr, offset)
+    offset += arr.length
+  }
+  return result
+}
+
+function encodeWAV(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2)
+  const view = new DataView(buffer)
+
+  function writeString(offset, string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i))
+    }
+  }
+
+  writeString(0, 'RIFF')
+  view.setUint32(4, 36 + samples.length * 2, true)
+  writeString(8, 'WAVE')
+  writeString(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeString(36, 'data')
+  view.setUint32(40, samples.length * 2, true)
+
+  let offset = 44
+  for (let i = 0; i < samples.length; i++) {
+    let s = Math.max(-1, Math.min(1, samples[i]))
+    s = s < 0 ? s * 0x8000 : s * 0x7FFF
+    view.setInt16(offset, s, true)
+    offset += 2
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' })
+}
+
+function cleanupAudioResources() {
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop())
+    mediaStream = null
+  }
+  if (audioContext) {
+    try { audioContext.close() } catch { /* ignore */ }
+    audioContext = null
+    gainNode = null
+  }
+  scriptNode = null
+  recordedSamples = []
+}
+
+async function processWithBackendASR(wavBlob) {
+  try {
+    const result = await speechToText(wavBlob, 'zh')
+    if (result.success && result.data?.text) {
+      const text = result.data.text.trim()
+      const pinyin = (result.data.pinyin || '').toLowerCase()
+      console.log('后端ASR识别结果:', text, '拼音:', pinyin)
+      if (text && tryMatchText(text, pinyin)) {
+        isProcessing.value = false
+        listeningText.value = ''
+        return
+      }
+    }
+    console.log('ASR未匹配到命令')
+  } catch (e) {
+    console.warn('后端ASR失败:', e.message)
+  }
+  isProcessing.value = false
+  listeningText.value = ''
+}
+
+const PINYIN_MAP = {
+  '正计时': 'zhengjishi',
+  '番茄钟': 'fanqiezhong',
+  '倒计时': 'daojishi',
+}
+
+function tryMatchText(text, pinyin) {
+  for (const [keyword, tabId] of Object.entries(VOICE_COMMANDS)) {
+    if (text.includes(keyword)) {
+      console.log('精确匹配语音命令:', keyword, '->', tabId)
+      executeVoiceCommand(tabId)
+      return true
+    }
+  }
+  if (pinyin) {
+    for (const [keyword, tabId] of Object.entries(VOICE_COMMANDS)) {
+      const kwPinyin = PINYIN_MAP[keyword]
+      if (kwPinyin && pinyin.includes(kwPinyin)) {
+        console.log('拼音匹配语音命令:', keyword, '->', tabId, '(识别拼音:', pinyin, ')')
+        executeVoiceCommand(tabId)
+        return true
+      }
+    }
+    for (const [keyword, tabId] of Object.entries(VOICE_COMMANDS)) {
+      const kwPinyin = PINYIN_MAP[keyword]
+      if (kwPinyin && fuzzyPinyinMatch(pinyin, kwPinyin)) {
+        console.log('模糊拼音匹配语音命令:', keyword, '->', tabId, '(识别拼音:', pinyin, ')')
+        executeVoiceCommand(tabId)
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function fuzzyPinyinMatch(recognized, target) {
+  const r = recognized.replace(/[^a-z]/g, '')
+  const t = target.replace(/[^a-z]/g, '')
+  if (r.length < 2 || t.length < 2) return false
+  if (r.includes(t.substring(0, Math.ceil(t.length * 0.6)))) return true
+  let matchCount = 0
+  let j = 0
+  for (let i = 0; i < t.length && j < r.length; i++) {
+    if (r[j] === t[i]) {
+      matchCount++
+      j++
+    }
+  }
+  return matchCount / t.length >= 0.7
+}
+
+async function executeVoiceCommand(tabId) {
+  const studyWidget = widgets.find(w => w.id === 'study')
+  if (studyWidget) {
+    activeWidget.value = studyWidget
+    await new Promise(r => setTimeout(r, 100))
+    if (widgetRef.value && widgetRef.value.switchToTab) {
+      widgetRef.value.switchToTab(tabId)
+    }
+  }
+  try {
+    if (!(await playPreloaded(preloadedOkAudio))) {
+      await preloadPromise
+      if (!(await playPreloaded(preloadedOkAudio))) {
+        await fetchAndPlay('好的')
+      }
+    }
+  } catch (e) {
+    console.warn('播放"好的"失败:', e)
+  }
+}
+
+const VOICE_COMMANDS = {
+  '正计时': 'stopwatch',
+  '番茄钟': 'pomodoro',
+  '倒计时': 'countdown',
+}
+
 const widgets = [
   {
-    id: 'focus',
-    label: '专注检测',
-    emoji: '📷',
-    width: '720px',
-    height: '560px',
-    component: shallowRef(FocusView),
-  },
-  {
-    id: 'pomodoro',
-    label: '番茄钟',
-    emoji: '🍅',
-    width: '520px',
-    height: '520px',
-    component: shallowRef(PomodoroView),
+    id: 'study',
+    label: '开始自习',
+    emoji: '📖',
+    width: '560px',
+    height: '680px',
+    component: shallowRef(StudySession),
   },
   {
     id: 'dashboard',
@@ -160,50 +582,6 @@ function onVolumeChange(e) {
   localStorage.setItem('amiya_volume', String(volumePercent.value))
 }
 
-function playAudio(url) {
-  return new Promise((resolve, reject) => {
-    const audio = new Audio(url)
-    audio.volume = volumePercent.value / 100
-    audio.onended = () => resolve()
-    audio.onerror = (e) => reject(e)
-    audio.play().catch(reject)
-  })
-}
-
-async function onCharacterClick() {
-  characterClicked.value = true
-  setTimeout(() => {
-    characterClicked.value = false
-  }, 600)
-  
-  try {
-    let audioUrl = null
-    
-    const readyRes = await getAmiyaReadyAudio('博士，我在')
-    if (readyRes.success && readyRes.data?.audio_url) {
-      audioUrl = readyRes.data.audio_url
-      console.log('使用预合成音频')
-    }
-    
-    if (!audioUrl) {
-      const res = await amiyaSpeak('博士，我在', true)
-      if (res.success && res.data?.audio_url) {
-        audioUrl = res.data.audio_url
-        console.log('使用合成音频')
-      }
-    }
-    
-    if (audioUrl) {
-      await playAudio(audioUrl)
-      console.log('阿米娅语音播放成功')
-    } else {
-      console.warn('阿米娅语音未返回音频URL')
-    }
-  } catch (error) {
-    console.error('阿米娅语音播放失败:', error)
-  }
-}
-
 onMounted(async () => {
   try {
     await axios.get('/api/health', { timeout: 3000 })
@@ -215,6 +593,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
+  cleanupAudioResources()
 })
 </script>
 
@@ -346,6 +725,51 @@ body {
 
 .desk-character.character-active .desk-character-inner {
   animation: characterBounce 0.6s ease;
+}
+
+.desk-character.character-listening .desk-character-inner {
+  animation: listeningPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes listeningPulse {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.03); }
+}
+
+.listening-indicator {
+  position: absolute;
+  top: -40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(74, 108, 247, 0.92);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 18px;
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 12px rgba(74, 108, 247, 0.4);
+}
+
+.listening-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  animation: dotBlink 0.8s ease-in-out infinite;
+}
+
+@keyframes dotBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.listening-text {
+  font-size: 12px;
+  line-height: 1;
 }
 
 @keyframes characterBounce {

@@ -16,6 +16,10 @@ export function getAmiyaReadyAudio(text = '博士，我在') {
   })
 }
 
+export function getAmiyaEncouragement() {
+  return request.get('/voice/amiya/encouragement')
+}
+
 /**
  * 获取阿米娅可用语音列表
  */

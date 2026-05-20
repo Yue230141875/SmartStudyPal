@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
-  base: '/SmartStudyPal/',
+  base: process.env.NODE_ENV === 'production' ? '/SmartStudyPal/' : '/',
   plugins: [vue()],
   server: {
     port: 5173,

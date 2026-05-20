@@ -5,17 +5,13 @@ from scipy.spatial.distance import euclidean
 
 logger = logging.getLogger(__name__)
 
-EAR_THRESHOLD_ATTENTIVE = 0.3
-EAR_THRESHOLD_DROWSY = 0.2
+EAR_THRESHOLD_ATTENTIVE = 0.25
+EAR_THRESHOLD_DROWSY = 0.18
 SLIDING_WINDOW_SIZE = 10
 BLINK_CONSECUTIVE_FRAMES = 3
 
 
 def calculate_ear(eye_points: np.ndarray) -> float:
-    """计算单眼的Eye Aspect Ratio
-
-    EAR = (||p2-p6|| + ||p3-p5||) / (2 * ||p1-p4||)
-    """
     vertical_1 = euclidean(eye_points[1], eye_points[5])
     vertical_2 = euclidean(eye_points[2], eye_points[4])
     horizontal = euclidean(eye_points[0], eye_points[3])
@@ -25,7 +21,6 @@ def calculate_ear(eye_points: np.ndarray) -> float:
 
 
 class FocusScorer:
-    """专注度评分器：多因子加权 + 滑动窗口 + 眨眼检测"""
 
     def __init__(self, window_size: int = SLIDING_WINDOW_SIZE,
                  eye_weight: float = 0.4,
@@ -37,6 +32,8 @@ class FocusScorer:
         self.body_weight = body_weight
         self.ear_history = deque(maxlen=window_size)
         self.score_history = deque(maxlen=window_size)
+        self.face_x_history = deque(maxlen=15)
+        self.baseline_x = None
         self.blink_counter = 0
         self.blink_total = 0
         self.frame_count = 0
@@ -45,29 +42,29 @@ class FocusScorer:
 
     def calculate_focus_score(self, ear_left: float, ear_right: float,
                               head_pose: dict = None,
-                              body_pose: dict = None) -> dict:
-        """计算综合专注度评分
-
-        参数:
-            ear_left: 左眼EAR值
-            ear_right: 右眼EAR值
-            head_pose: {"pitch": float, "yaw": float, "roll": float}
-            body_pose: {"label": str, "score": float}
-
-        返回:
-            {"score": float, "label": str, "ear_avg": float,
-             "eye_score": float, "head_score": float, "body_score": float,
-             "blink_detected": bool, "blink_count": int}
-        """
+                              body_pose: dict = None,
+                              face_rect: tuple = None,
+                              frame_shape: tuple = None) -> dict:
         self.frame_count += 1
         avg_ear = (ear_left + ear_right) / 2.0
         self.ear_history.append(avg_ear)
 
+        self._update_baseline(face_rect, frame_shape)
+
         blink_detected = self._detect_blink(ear_left, ear_right)
 
         eye_score = self._calc_eye_score(ear_left, ear_right)
-        head_score = self._calc_head_score(head_pose)
+        head_score = self._calc_head_score(head_pose, face_rect, frame_shape)
         body_score = self._calc_body_score(body_pose)
+
+        if head_pose is not None:
+            yaw_mag = abs(head_pose.get("yaw", 0))
+            if yaw_mag >= 50:
+                eye_score = min(eye_score, 30)
+            elif yaw_mag >= 35:
+                eye_score = min(eye_score, 55)
+            elif yaw_mag >= 25:
+                eye_score = min(eye_score, 75)
 
         total_score = (eye_score * self.eye_weight +
                        head_score * self.head_weight +
@@ -75,7 +72,7 @@ class FocusScorer:
         total_score = max(0, min(100, total_score))
 
         if len(self.score_history) > 0:
-            smoothed = 0.7 * total_score + 0.3 * self.score_history[-1]
+            smoothed = 0.5 * total_score + 0.5 * self.score_history[-1]
             total_score = smoothed
 
         self.score_history.append(total_score)
@@ -93,8 +90,22 @@ class FocusScorer:
             "blink_count": self.blink_total
         }
 
+    def _update_baseline(self, face_rect: tuple, frame_shape: tuple):
+        if face_rect is None or frame_shape is None:
+            return
+        try:
+            w = frame_shape[1]
+            fx, fy, fw, fh = face_rect
+            center_x = (fx + fw / 2) / w
+            self.face_x_history.append(center_x)
+            if len(self.face_x_history) >= 8 and self.baseline_x is None:
+                vals = list(self.face_x_history)
+                self.baseline_x = np.median(vals)
+                logger.debug(f"人脸基准位置建立: {self.baseline_x:.3f}")
+        except Exception:
+            pass
+
     def _detect_blink(self, ear_left: float, ear_right: float) -> bool:
-        """眨眼检测：连续N帧EAR低于阈值计为一次眨眼"""
         avg_ear = (ear_left + ear_right) / 2.0
         if avg_ear < EAR_THRESHOLD_DROWSY:
             self.blink_counter += 1
@@ -106,7 +117,6 @@ class FocusScorer:
         return self.blink_counter >= BLINK_CONSECUTIVE_FRAMES
 
     def _calc_eye_score(self, ear_left: float, ear_right: float) -> float:
-        """眼部评分：基于EAR值"""
         avg_ear = (ear_left + ear_right) / 2.0
         if len(self.ear_history) >= 3:
             recent = list(self.ear_history)[-3:]
@@ -114,39 +124,80 @@ class FocusScorer:
 
         if avg_ear >= EAR_THRESHOLD_ATTENTIVE:
             return 100
-        elif avg_ear >= 0.25:
-            return 75
+        elif avg_ear >= 0.20:
+            return 80
         elif avg_ear >= EAR_THRESHOLD_DROWSY:
-            return 40
+            return 50
         else:
-            return 10
+            return 15
 
-    def _calc_head_score(self, head_pose: dict) -> float:
-        """头部姿态评分"""
+    def _calc_head_score(self, head_pose: dict, face_rect: tuple = None,
+                         frame_shape: tuple = None) -> float:
+
         if head_pose is None:
-            return 70
+            return 80
+
         pitch = head_pose.get("pitch", 0)
         yaw = head_pose.get("yaw", 0)
-        if abs(pitch) < 15 and abs(yaw) < 15:
-            return 100
-        elif abs(pitch) < 25 and abs(yaw) < 25:
-            return 60
+
+        yaw_score = 100
+        if abs(yaw) < 20:
+            yaw_score = 100
+        elif abs(yaw) < 35:
+            yaw_score = 75
+        elif abs(yaw) < 50:
+            yaw_score = 45
         else:
-            return 20
+            yaw_score = 20
+
+        pitch_score = 100
+        if -45 <= pitch <= 10:
+            pitch_score = 100
+        elif -60 <= pitch < -45:
+            pitch_score = 80
+        elif 10 < pitch <= 25:
+            pitch_score = 70
+        elif pitch > 25:
+            pitch_score = 40
+        elif pitch < -60:
+            pitch_score = 50
+
+        base_score = yaw_score * 0.6 + pitch_score * 0.4
+
+        return base_score
+
+    def _face_offset_severity(self, face_rect: tuple, frame_shape: tuple):
+        if face_rect is None or frame_shape is None:
+            return None
+        try:
+            w = frame_shape[1]
+            fx, fy, fw, fh = face_rect
+            face_center_x = (fx + fw / 2) / w
+
+            if self.baseline_x is not None:
+                rel_offset = abs(face_center_x - self.baseline_x)
+                if rel_offset > 0.22:
+                    return "large"
+                elif rel_offset > 0.15:
+                    return "medium"
+                else:
+                    return None
+            else:
+                return None
+        except Exception:
+            return None
 
     def _calc_body_score(self, body_pose: dict) -> float:
-        """身体姿态评分"""
         if body_pose is None:
-            return 70
+            return 80
         label = body_pose.get("label", "正常")
-        score_map = {"正常": 100, "前倾": 50, "趴桌": 10, "离座": 0}
-        return score_map.get(label, 70)
+        score_map = {"正常": 100, "前倾": 70, "趴桌": 20, "离座": 0}
+        return score_map.get(label, 80)
 
     def _score_to_label(self, score: float) -> str:
-        """分数转标签"""
-        if score >= 75:
+        if score >= 65:
             return "专注"
-        elif score >= 50:
+        elif score >= 45:
             return "轻度分心"
         elif score >= 25:
             return "明显走神"
@@ -154,7 +205,6 @@ class FocusScorer:
             return "疲劳"
 
     def get_blink_rate(self) -> float:
-        """获取每分钟眨眼频率"""
         if self.frame_count < 10:
             return 0.0
         fps_estimate = 15
@@ -164,9 +214,10 @@ class FocusScorer:
         return self.blink_total / minutes
 
     def reset(self):
-        """重置所有状态"""
         self.ear_history.clear()
         self.score_history.clear()
+        self.face_x_history.clear()
+        self.baseline_x = None
         self.blink_counter = 0
         self.blink_total = 0
         self.frame_count = 0
@@ -174,33 +225,40 @@ class FocusScorer:
 
 def calculate_focus_score(ear_left: float, ear_right: float,
                           head_pose: dict = None,
-                          body_pose: dict = None) -> dict:
-    """便捷函数：计算专注度评分（无状态）"""
+                          body_pose: dict = None,
+                          face_rect: tuple = None,
+                          frame_shape: tuple = None) -> dict:
     scorer = FocusScorer()
-    return scorer.calculate_focus_score(ear_left, ear_right, head_pose, body_pose)
+    return scorer.calculate_focus_score(ear_left, ear_right, head_pose, body_pose,
+                                        face_rect, frame_shape)
 
 
 def test():
-    """专注度评分模块测试"""
     print("=== 专注度评分模块测试 ===")
     scorer = FocusScorer()
 
     test_cases = [
-        ("正常睁眼", 0.35, 0.33, None, None),
-        ("闭眼/疲劳", 0.15, 0.14, None, None),
-        ("轻微低头", 0.28, 0.27, {"pitch": -20, "yaw": 5}, None),
-        ("趴桌", 0.30, 0.29, None, {"label": "趴桌"}),
-        ("转头", 0.32, 0.31, {"pitch": 0, "yaw": 30}, None),
-        ("正常+身体正常", 0.35, 0.34, {"pitch": 5, "yaw": -3}, {"label": "正常"}),
+        ("正视居中(基准)", 0.34, 0.33, {"pitch": -5, "yaw": 3}, {"label": "正常"}, (220, 80, 200, 280), (480, 640)),
+        ("正视居中(基准)", 0.34, 0.33, {"pitch": -5, "yaw": 3}, {"label": "正常"}, (225, 85, 195, 275), (480, 640)),
+        ("正视居中(基准)", 0.34, 0.33, {"pitch": -5, "yaw": 3}, {"label": "正常"}, (218, 82, 202, 278), (480, 640)),
+        ("正视居中(基准)", 0.34, 0.33, {"pitch": -5, "yaw": 3}, {"label": "正常"}, (222, 78, 198, 282), (480, 640)),
+        ("正视居中(基准)", 0.34, 0.33, {"pitch": -5, "yaw": 3}, {"label": "正常"}, (220, 80, 200, 280), (480, 640)),
+        ("正视居中(基准)", 0.34, 0.33, {"pitch": -5, "yaw": 3}, {"label": "正常"}, (223, 83, 197, 277), (480, 640)),
+        ("正视居中(基准)", 0.34, 0.33, {"pitch": -5, "yaw": 3}, {"label": "正常"}, (219, 79, 201, 281), (480, 640)),
+        ("正视居中(基准)", 0.34, 0.33, {"pitch": -5, "yaw": 3}, {"label": "正常"}, (221, 81, 199, 279), (480, 640)),
+        ("向左偏头", 0.32, 0.31, {"pitch": 0, "yaw": 5}, {"label": "正常"}, (80, 90, 180, 270), (480, 640)),
+        ("向右偏头", 0.32, 0.31, {"pitch": 0, "yaw": -5}, {"label": "正常"}, (360, 90, 180, 270), (480, 640)),
+        ("大幅左转", 0.30, 0.29, {"pitch": 0, "yaw": 35}, {"label": "正常"}, (60, 90, 170, 270), (480, 640)),
+        ("大幅右转", 0.30, 0.29, {"pitch": 0, "yaw": -35}, {"label": "正常"}, (380, 90, 170, 270), (480, 640)),
+        ("极左转", 0.28, 0.27, {"pitch": 0, "yaw": 55}, {"label": "正常"}, (20, 90, 160, 270), (480, 640)),
+        ("极右转", 0.28, 0.27, {"pitch": 0, "yaw": -55}, {"label": "正常"}, (420, 90, 160, 270), (480, 640)),
     ]
 
-    for name, ear_l, ear_r, head, body in test_cases:
-        result = scorer.calculate_focus_score(ear_l, ear_r, head, body)
+    for name, ear_l, ear_r, head, body, rect, shape in test_cases:
+        result = scorer.calculate_focus_score(ear_l, ear_r, head, body, rect, shape)
         print(f"  {name}: score={result['score']}, label={result['label']}, "
-              f"ear_avg={result['ear_avg']}, blink={result['blink_detected']}")
+              f"head={result['head_score']}")
 
-    print(f"  累计眨眼次数: {scorer.blink_total}")
-    print(f"  眨眼频率: {scorer.get_blink_rate():.1f} 次/分钟")
     print("[OK] 专注度评分模块测试完成")
 
 

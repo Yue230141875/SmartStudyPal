@@ -210,18 +210,18 @@ class PoseEstimator:
 
             head_shoulder_ratio = (shoulder_avg_y - nose.y) / max(shoulder_width, 0.01)
 
-            if head_shoulder_ratio < 0.3:
+            if head_shoulder_ratio < 0.2:
                 label, score = "趴桌", 10
-            elif head_shoulder_ratio < 0.5:
-                label, score = "前倾", 50
+            elif head_shoulder_ratio < 0.4:
+                label, score = "前倾", 70
             elif head_shoulder_ratio < 1.0:
                 label, score = "正常", 100
             else:
                 label, score = "正常", 100
 
-            if shoulder_tilt_deg > 15:
+            if shoulder_tilt_deg > 20:
                 label = "前倾"
-                score = min(score, 50)
+                score = min(score, 70)
 
             return {
                 "label": label,
@@ -326,18 +326,18 @@ class PoseEstimator:
 
             head_shoulder_ratio = (shoulder_avg_y - nose.y) / max(shoulder_width, 0.01)
 
-            if head_shoulder_ratio < 0.3:
+            if head_shoulder_ratio < 0.2:
                 label, score = "趴桌", 10
-            elif head_shoulder_ratio < 0.5:
-                label, score = "前倾", 50
+            elif head_shoulder_ratio < 0.4:
+                label, score = "前倾", 70
             elif head_shoulder_ratio < 1.0:
                 label, score = "正常", 100
             else:
                 label, score = "正常", 100
 
-            if shoulder_tilt_deg > 15:
+            if shoulder_tilt_deg > 20:
                 label = "前倾"
-                score = min(score, 50)
+                score = min(score, 70)
 
             return {
                 "label": label,

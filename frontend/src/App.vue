@@ -45,10 +45,25 @@
       </div>
     </div>
 
-    <!-- 实时时钟 -->
+    <!-- 实时时钟 + 目标倒计时 -->
     <div class="clock-panel">
       <div class="clock-time">{{ currentTime }}</div>
       <div class="clock-date">{{ currentDate }}</div>
+      <div class="goal-countdown">
+        <div class="goal-selector">
+          <span
+            v-for="g in goals"
+            :key="g.id"
+            class="goal-tag"
+            :class="{ 'goal-active': selectedGoal === g.id }"
+            @click="selectGoal(g.id)"
+          >{{ g.label }}</span>
+        </div>
+        <div class="goal-info">
+          距离<span class="goal-name">{{ currentGoalLabel }}</span>还有
+          <span class="goal-days">{{ daysLeft }}</span>天
+        </div>
+      </div>
     </div>
 
     <!-- 阿米娅角色 -->
@@ -102,7 +117,7 @@
 </template>
 
 <script setup>
-import { ref, shallowRef, onMounted, onUnmounted } from 'vue'
+import { ref, computed, shallowRef, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import { amiyaSpeak, getAmiyaReadyAudio, speechToText } from './api/voice'
 import StudySession from './components/StudySession.vue'
@@ -121,6 +136,31 @@ const volumePercent = ref(parseInt(localStorage.getItem('amiya_volume') || '80')
 const currentTime = ref('')
 const currentDate = ref('')
 let clockTimer = null
+
+const goals = [
+  { id: 'kaoyan', label: '考研', targetDate: '2026-12-26' },
+  { id: 'cet46', label: '四六级', targetDate: '2026-06-13' },
+  { id: 'gaokao', label: '高考', targetDate: '2026-06-07' },
+  { id: 'gongkao', label: '公考', targetDate: '2026-11-29' },
+]
+const selectedGoal = ref(localStorage.getItem('study_goal') || 'kaoyan')
+const currentGoalLabel = computed(() => {
+  const g = goals.find(x => x.id === selectedGoal.value)
+  return g ? g.label : ''
+})
+const daysLeft = computed(() => {
+  const g = goals.find(x => x.id === selectedGoal.value)
+  if (!g) return 0
+  const now = new Date()
+  const target = new Date(g.targetDate)
+  const diff = Math.ceil((target - now) / (1000 * 60 * 60 * 24))
+  return diff > 0 ? diff : 0
+})
+
+function selectGoal(id) {
+  selectedGoal.value = id
+  localStorage.setItem('study_goal', id)
+}
 
 const preloadedAudio = ref(null)
 const preloadedLongPressAudio = ref(null)
@@ -684,11 +724,11 @@ body {
 .clock-panel {
   position: absolute;
   left: 50%;
-  top: 35%;
+  top: 26%;
   transform: translate(-50%, -50%);
   z-index: 9;
   text-align: center;
-  padding: 16px 40px;
+  padding: 20px 40px 18px;
   background: rgba(255, 255, 255, 0.45);
   backdrop-filter: blur(16px);
   border-radius: 24px;
@@ -712,6 +752,62 @@ body {
   color: #7a6555;
   margin-top: 4px;
   letter-spacing: 1px;
+}
+
+.goal-countdown {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(139, 105, 20, 0.15);
+}
+
+.goal-selector {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.goal-tag {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8b7355;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: rgba(139, 105, 20, 0.08);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  user-select: none;
+}
+
+.goal-tag:hover {
+  background: rgba(139, 105, 20, 0.18);
+  color: #5c4033;
+}
+
+.goal-active {
+  background: linear-gradient(135deg, #8b6914, #a07a23);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(139, 105, 20, 0.3);
+}
+
+.goal-info {
+  font-size: 13px;
+  color: #6b5a4a;
+  margin-top: 8px;
+  letter-spacing: 0.5px;
+}
+
+.goal-name {
+  font-weight: 600;
+  color: #8b6914;
+}
+
+.goal-days {
+  font-size: 22px;
+  font-weight: 700;
+  color: #c0392b;
+  margin: 0 3px;
+  font-variant-numeric: tabular-nums;
 }
 
 .desk-character-inner {

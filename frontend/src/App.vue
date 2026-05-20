@@ -50,18 +50,22 @@
       <div class="clock-time">{{ currentTime }}</div>
       <div class="clock-date">{{ currentDate }}</div>
       <div class="goal-countdown">
-        <div class="goal-selector">
-          <span
+        <div class="goal-info">
+          距离
+          <span class="goal-name goal-clickable" @click.stop="showGoalDropdown = !showGoalDropdown">
+            {{ currentGoalLabel }} ▾
+          </span>
+          还有
+          <span class="goal-days">{{ daysLeft }}</span>天
+        </div>
+        <div v-if="showGoalDropdown" class="goal-dropdown" @click.outside="showGoalDropdown = false">
+          <div
             v-for="g in goals"
             :key="g.id"
-            class="goal-tag"
-            :class="{ 'goal-active': selectedGoal === g.id }"
-            @click="selectGoal(g.id)"
-          >{{ g.label }}</span>
-        </div>
-        <div class="goal-info">
-          距离<span class="goal-name">{{ currentGoalLabel }}</span>还有
-          <span class="goal-days">{{ daysLeft }}</span>天
+            class="goal-option"
+            :class="{ 'goal-option-active': selectedGoal === g.id }"
+            @click="selectGoal(g.id); showGoalDropdown = false"
+          >{{ g.label }}</div>
         </div>
       </div>
     </div>
@@ -140,10 +144,12 @@ let clockTimer = null
 const goals = [
   { id: 'kaoyan', label: '考研', targetDate: '2026-12-26' },
   { id: 'cet46', label: '四六级', targetDate: '2026-06-13' },
-  { id: 'gaokao', label: '高考', targetDate: '2026-06-07' },
   { id: 'gongkao', label: '公考', targetDate: '2026-11-29' },
+  { id: 'ncre', label: '计算机等级考试', targetDate: '2026-09-20' },
+  { id: 'gaokao', label: '高考', targetDate: '2026-06-07' },
 ]
 const selectedGoal = ref(localStorage.getItem('study_goal') || 'kaoyan')
+const showGoalDropdown = ref(false)
 const currentGoalLabel = computed(() => {
   const g = goals.find(x => x.id === selectedGoal.value)
   return g ? g.label : ''
@@ -724,7 +730,7 @@ body {
 .clock-panel {
   position: absolute;
   left: 50%;
-  top: 26%;
+  top: 30%;
   transform: translate(-50%, -50%);
   z-index: 9;
   text-align: center;
@@ -758,42 +764,12 @@ body {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid rgba(139, 105, 20, 0.15);
-}
-
-.goal-selector {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.goal-tag {
-  font-size: 12px;
-  font-weight: 500;
-  color: #8b7355;
-  padding: 3px 10px;
-  border-radius: 10px;
-  background: rgba(139, 105, 20, 0.08);
-  cursor: pointer;
-  transition: all 0.25s ease;
-  user-select: none;
-}
-
-.goal-tag:hover {
-  background: rgba(139, 105, 20, 0.18);
-  color: #5c4033;
-}
-
-.goal-active {
-  background: linear-gradient(135deg, #8b6914, #a07a23);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(139, 105, 20, 0.3);
+  position: relative;
 }
 
 .goal-info {
   font-size: 13px;
   color: #6b5a4a;
-  margin-top: 8px;
   letter-spacing: 0.5px;
 }
 
@@ -802,12 +778,67 @@ body {
   color: #8b6914;
 }
 
+.goal-clickable {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.goal-clickable:hover {
+  background: rgba(139, 105, 20, 0.12);
+}
+
 .goal-days {
   font-size: 22px;
   font-weight: 700;
   color: #c0392b;
   margin: 0 3px;
   font-variant-numeric: tabular-nums;
+}
+
+.goal-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  padding: 6px 0;
+  min-width: 150px;
+  z-index: 20;
+  animation: dropFadeIn 0.18s ease;
+}
+
+@keyframes dropFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.goal-option {
+  padding: 9px 20px;
+  font-size: 13px;
+  color: #5c4033;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.goal-option:hover {
+  background: rgba(139, 105, 20, 0.1);
+  color: #8b6914;
+}
+
+.goal-option-active {
+  color: #fff;
+  background: linear-gradient(135deg, #8b6914, #a07a23);
+  font-weight: 600;
+}
+
+.goal-option-active:hover {
+  background: linear-gradient(135deg, #7a5c11, #8f6d1f);
 }
 
 .desk-character-inner {

@@ -366,25 +366,54 @@ async function onLongPressStart() {
     audioContext = new AudioContext({ sampleRate: 16000 })
     const source = audioContext.createMediaStreamSource(mediaStream)
 
+    const highpass = audioContext.createBiquadFilter()
+    highpass.type = 'highpass'
+    highpass.frequency.value = 80
+    highpass.Q.value = 0.7
+
     gainNode = audioContext.createGain()
-    gainNode.gain.value = 3.0
+    gainNode.gain.value = 6.0
 
     const compressor = audioContext.createDynamicsCompressor()
-    compressor.threshold.value = -30
-    compressor.knee.value = 20
-    compressor.ratio.value = 8
+    compressor.threshold.value = -36
+    compressor.knee.value = 16
+    compressor.ratio.value = 10
     compressor.attack.value = 0.003
-    compressor.release.value = 0.1
+    compressor.release.value = 0.15
 
     scriptNode = audioContext.createScriptProcessor(4096, 1, 1)
     recordedSamples = []
+    let noiseFloor = 0
+    let calibrationFrames = 0
+    const CALIBRATION_FRAMES = 8
 
     scriptNode.onaudioprocess = (e) => {
       const inputData = e.inputBuffer.getChannelData(0)
-      recordedSamples.push(new Float32Array(inputData))
+      if (calibrationFrames < CALIBRATION_FRAMES) {
+        let rms = 0
+        for (let i = 0; i < inputData.length; i++) rms += inputData[i] * inputData[i]
+        rms = Math.sqrt(rms / inputData.length)
+        noiseFloor += rms
+        calibrationFrames++
+        return
+      }
+      if (calibrationFrames === CALIBRATION_FRAMES) {
+        noiseFloor /= CALIBRATION_FRAMES
+        noiseFloor *= 2.5
+        calibrationFrames++
+      }
+
+      let rms = 0
+      for (let i = 0; i < inputData.length; i++) rms += inputData[i] * inputData[i]
+      rms = Math.sqrt(rms / inputData.length)
+
+      if (rms > noiseFloor) {
+        recordedSamples.push(new Float32Array(inputData))
+      }
     }
 
-    source.connect(gainNode)
+    source.connect(highpass)
+    highpass.connect(gainNode)
     gainNode.connect(compressor)
     compressor.connect(scriptNode)
     scriptNode.connect(audioContext.destination)
@@ -431,9 +460,55 @@ function onLongPressEnd() {
 
   cleanupAudioResources()
 
-  const wavBlob = encodeWAV(allSamples, 16000)
+  let processed = trimSilence(allSamples, 0.015)
+  processed = normalizeAudio(processed)
+
+  if (processed.length < 16000 * 0.3) {
+    console.warn('录音太短，可能未检测到语音')
+    isProcessing.value = false
+    listeningText.value = ''
+    return
+  }
+
+  const wavBlob = encodeWAV(processed, 16000)
 
   processWithBackendASR(wavBlob)
+}
+
+function trimSilence(samples, threshold) {
+  const len = samples.length
+  let start = 0
+  let end = len
+
+  for (let i = 0; i < Math.min(len, 8000); i += 256) {
+    let sum = 0
+    for (let j = i; j < Math.min(i + 256, len); j++) sum += Math.abs(samples[j])
+    if (sum / 256 > threshold) { start = i; break }
+  }
+
+  for (let i = len - 1; i > Math.max(len - 8000, start); i -= 256) {
+    let sum = 0
+    for (let j = Math.max(i - 256, 0); j <= i; j++) sum += Math.abs(samples[j])
+    if (sum / 256 > threshold) { end = i + 1; break }
+  }
+
+  return new Float32Array(samples.buffer, start * 4, end - start)
+}
+
+function normalizeAudio(samples) {
+  let maxVal = 0
+  for (let i = 0; i < samples.length; i++) {
+    const abs = Math.abs(samples[i])
+    if (abs > maxVal) maxVal = abs
+  }
+  if (maxVal === 0 || maxVal > 0.9) return samples
+
+  const target = 0.85
+  const result = new Float32Array(samples.length)
+  for (let i = 0; i < samples.length; i++) {
+    result[i] = samples[i] * (target / maxVal)
+  }
+  return result
 }
 
 function concatFloat32Arrays(arrays) {

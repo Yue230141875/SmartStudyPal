@@ -207,9 +207,9 @@ async def get_amiya_ready_audio(text: str = Query("博士，我在")):
             audio_url = vm.amiya_tts.get_audio_url(text)
             if audio_url:
                 return {"success": True, "data": {"audio_url": audio_url, "cached": True}}
-        return {"success": False, "data": {"cached": False, "message": "音频未预合成"}}
+        return {"success": True, "data": {"audio_url": None, "cached": False}}
     except Exception as e:
-        return {"success": False, "message": str(e)}
+        return {"success": True, "data": {"audio_url": None, "cached": False, "error": str(e)}}
 
 
 @router.get("/amiya/encouragement")

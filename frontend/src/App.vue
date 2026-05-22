@@ -207,13 +207,13 @@ async function preloadAmiyaAudio() {
         let audioUrl = null
         try {
           const readyRes = await getAmiyaReadyAudio(item.text)
-          if (readyRes.success && readyRes.data?.audio_url) {
+          if (readyRes.success && readyRes.data?.cached && readyRes.data?.audio_url) {
             audioUrl = readyRes.data.audio_url
           }
-        } catch { /* ready未命中 */ }
+        } catch { /* ready异常 */ }
         if (!audioUrl) {
           try {
-            const res = await amiyaSpeak(item.text, true)
+            const res = await amiyaSpeak(item.text, false)
             if (res.success && res.data?.audio_url) {
               audioUrl = res.data.audio_url
             }
@@ -269,13 +269,14 @@ async function fetchAndPlay(text) {
   let audioUrl = null
   try {
     const readyRes = await getAmiyaReadyAudio(text)
-    if (readyRes.success && readyRes.data?.audio_url) {
+    if (readyRes.success && readyRes.data?.cached && readyRes.data?.audio_url) {
       audioUrl = readyRes.data.audio_url
     }
-  } catch { /* ready未命中，继续尝试合成 */ }
+  } catch { /* ready异常，继续尝试合成 */ }
+
   if (!audioUrl) {
     try {
-      const res = await amiyaSpeak(text, true)
+      const res = await amiyaSpeak(text, false)
       if (res.success && res.data?.audio_url) {
         audioUrl = res.data.audio_url
       }

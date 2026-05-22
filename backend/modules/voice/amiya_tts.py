@@ -207,7 +207,41 @@ class AmiyaTTS:
                 "audio_url": f"/api/voice/amiya/audio/{cached.name}"
             }
 
-        return self._synthesize_new(text)
+        result = self._synthesize_new(text)
+        if result.get("success"):
+            return result
+
+        fallback = self._get_fallback(text)
+        if fallback:
+            logger.warning(f"MiMo合成失败({result.get('message','?')}), 降级使用: {fallback['type']}")
+            return fallback
+
+        return result
+
+    def _get_fallback(self, text: str) -> Optional[dict]:
+        cached = self._get_cached(text)
+        if cached and cached.exists():
+            return {
+                "success": True,
+                "message": "降级-缓存语音",
+                "type": "fallback_cached",
+                "audio_file": cached.name,
+                "audio_url": f"/api/voice/amiya/audio/{cached.name}"
+            }
+        for preset_key in ["hello", "talk", "idle"]:
+            matched_voice = self._match_keyword(text)
+            if matched_voice:
+                voice_path = self._get_voice_path(matched_voice)
+                if voice_path:
+                    return {
+                        "success": True,
+                        "message": "降级-预设语音",
+                        "type": "fallback_preset",
+                        "voice": matched_voice,
+                        "audio_file": voice_path.name,
+                        "audio_url": f"/api/voice/amiya/audio/{voice_path.name}"
+                    }
+        return None
 
     def _get_cached(self, text: str) -> Optional[Path]:
         h = self._text_hash(text)

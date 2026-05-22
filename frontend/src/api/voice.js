@@ -6,7 +6,8 @@ import request from './request'
 export function amiyaSpeak(text = null, forceSynthesize = false) {
   const params = text ? { text, force_synthesize: forceSynthesize } : { force_synthesize: forceSynthesize }
   return request.post('/voice/amiya/speak', null, {
-    params
+    params,
+    timeout: 60000
   })
 }
 

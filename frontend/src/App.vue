@@ -123,7 +123,7 @@
 <script setup>
 import { ref, computed, shallowRef, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
-import { amiyaSpeak, getAmiyaReadyAudio, speechToText } from './api/voice'
+import { amiyaSpeak, getAmiyaReadyAudio, getAmiyaGreeting, speechToText } from './api/voice'
 import StudySession from './components/StudySession.vue'
 import DashboardView from './views/DashboardView.vue'
 import deskBgImg from './assets/desk.png'
@@ -335,6 +335,15 @@ async function onShortPress() {
     if (await playPreloaded(preloadedAudio)) return
     await preloadPromise
     if (await playPreloaded(preloadedAudio)) return
+
+    try {
+      const res = await getAmiyaGreeting()
+      if (res.success && res.data?.audio_url) {
+        await playAudio(res.data.audio_url)
+        return
+      }
+    } catch { /* greeting接口失败，降级 */ }
+
     await fetchAndPlay('博士，我在')
   } catch (error) {
     console.error('阿米娅语音播放失败:', error)

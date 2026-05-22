@@ -21,6 +21,10 @@ export function getAmiyaEncouragement() {
   return request.get('/voice/amiya/encouragement')
 }
 
+export function getAmiyaGreeting() {
+  return request.get('/voice/amiya/greeting')
+}
+
 /**
  * 获取阿米娅可用语音列表
  */

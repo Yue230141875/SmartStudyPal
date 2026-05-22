@@ -226,6 +226,20 @@ async def get_amiya_encouragement():
         return {"success": False, "message": str(e)}
 
 
+@router.get("/amiya/greeting")
+async def get_amiya_greeting():
+    """随机获取阿米娅打招呼语音"""
+    try:
+        vm = get_voice_manager()
+        if vm.amiya_tts:
+            result = vm.amiya_tts.get_random_greeting()
+            if result:
+                return {"success": True, "data": result}
+        return {"success": False, "message": "打招呼语音未就绪"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 @router.post("/amiya/speak")
 async def amiya_speak(text: str = Query(None), force_synthesize: bool = Query(False)):
     """

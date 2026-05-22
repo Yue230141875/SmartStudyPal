@@ -240,6 +240,20 @@ async def get_amiya_greeting():
         return {"success": False, "message": str(e)}
 
 
+@router.get("/amiya/focus-reminder")
+async def get_amiya_focus_reminder():
+    """随机获取阿米娅专注提醒语音"""
+    try:
+        vm = get_voice_manager()
+        if vm.amiya_tts:
+            result = vm.amiya_tts.get_random_focus_reminder()
+            if result:
+                return {"success": True, "data": result}
+        return {"success": False, "message": "专注提醒语音未就绪"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 @router.post("/amiya/speak")
 async def amiya_speak(text: str = Query(None), force_synthesize: bool = Query(False)):
     """

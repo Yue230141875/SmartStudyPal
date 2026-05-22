@@ -50,6 +50,11 @@ class AmiyaTTS:
         "博士，有什么需要我帮忙的吗": None,
         "博士，我一直在这里等你": None,
         "博士，今天也请多关照了": None,
+        "博士，集中注意力哦": None,
+        "不要走神啦，博士": None,
+        "博士，学习时间要好好利用哦": None,
+        "博士，调整一下状态吧": None,
+        "博士，深呼吸，重新专注起来": None,
     }
 
     ENCOURAGEMENT_TEXTS = [
@@ -68,6 +73,15 @@ class AmiyaTTS:
         "博士，有什么需要我帮忙的吗",
         "博士，我一直在这里等你",
         "博士，今天也请多关照了",
+    ]
+
+    FOCUS_REMINDER_TEXTS = [
+        "博士，专注当下，不要分心",
+        "博士，集中注意力哦",
+        "不要走神啦，博士",
+        "博士，学习时间要好好利用哦",
+        "博士，调整一下状态吧",
+        "博士，深呼吸，重新专注起来",
     ]
 
     AMIYA_STYLE = """
@@ -194,6 +208,17 @@ class AmiyaTTS:
         import random
         available = []
         for text in self.GREETING_TEXTS:
+            url = self.get_audio_url(text)
+            if url:
+                available.append({"text": text, "audio_url": url})
+        if not available:
+            return None
+        return random.choice(available)
+
+    def get_random_focus_reminder(self) -> Optional[dict]:
+        import random
+        available = []
+        for text in self.FOCUS_REMINDER_TEXTS:
             url = self.get_audio_url(text)
             if url:
                 available.append({"text": text, "audio_url": url})

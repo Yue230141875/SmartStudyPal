@@ -106,6 +106,7 @@ import { startPomodoro, completePomodoro } from '../api/pomodoro'
 import { getAmiyaEncouragement } from '../api/voice'
 import FocusDetector from './FocusDetector.vue'
 import WhiteNoisePlayer from './WhiteNoisePlayer.vue'
+import { getAmiyaFocusReminder } from '../api/voice'
 
 const tabs = [
   { id: 'pomodoro', name: '番茄钟', icon: '🍅' },
@@ -134,6 +135,9 @@ const currentPomodoroId = ref(null)
 let intervalId = null
 let focusScoreSum = 0
 let focusScoreCount = 0
+let lastFocusReminderTime = 0
+const FOCUS_REMINDER_COOLDOWN = 60000
+let lowScoreStreak = 0
 
 async function playEncouragement() {
   try {
@@ -302,6 +306,32 @@ function tickStopwatch() {
 function onFocusScoreUpdate(data) {
   focusScoreSum += data.focusScore
   focusScoreCount++
+
+  if (data.focusScore < 60) {
+    lowScoreStreak++
+    if (lowScoreStreak >= 3) {
+      const now = Date.now()
+      if (now - lastFocusReminderTime > FOCUS_REMINDER_COOLDOWN) {
+        lastFocusReminderTime = now
+        lowScoreStreak = 0
+        playFocusReminder()
+      }
+    }
+  } else {
+    lowScoreStreak = 0
+  }
+}
+
+async function playFocusReminder() {
+  try {
+    const res = await getAmiyaFocusReminder()
+    if (res.success && res.data?.audio_url) {
+      const audio = new Audio(res.data.audio_url)
+      const vol = parseInt(localStorage.getItem('amiya_volume') || '80')
+      audio.volume = vol / 100
+      audio.play().catch(() => {})
+    }
+  } catch { /* ignore */ }
 }
 
 function onDetectionChange(active) {

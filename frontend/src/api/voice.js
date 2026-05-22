@@ -25,6 +25,10 @@ export function getAmiyaGreeting() {
   return request.get('/voice/amiya/greeting')
 }
 
+export function getAmiyaFocusReminder() {
+  return request.get('/voice/amiya/focus-reminder')
+}
+
 /**
  * 获取阿米娅可用语音列表
  */

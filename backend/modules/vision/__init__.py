@@ -4,13 +4,32 @@ import cv2
 
 logger = logging.getLogger(__name__)
 
+_ImagePreprocessor = None
+_FaceDetector = None
+_DLIB_AVAILABLE = False
+_FocusScorer = None
+_PoseEstimator = None
+_MP_AVAILABLE = False
+
 try:
-    from .image_preprocessor import ImagePreprocessor
-    from .face_detector import FaceDetector, _DLIB_AVAILABLE
-    from .focus_scorer import FocusScorer, calculate_focus_score, calculate_ear
-    from .pose_estimator import PoseEstimator, _MP_AVAILABLE
+    from .image_preprocessor import ImagePreprocessor as _ImagePreprocessor
 except ImportError as e:
-    logger.warning(f"视觉模块导入失败: {e}")
+    logger.warning(f"图像预处理模块导入失败: {e}")
+
+try:
+    from .face_detector import FaceDetector as _FaceDetector, _DLIB_AVAILABLE
+except ImportError as e:
+    logger.warning(f"人脸检测模块导入失败: {e}")
+
+try:
+    from .focus_scorer import FocusScorer as _FocusScorer
+except ImportError as e:
+    logger.warning(f"专注度评分模块导入失败: {e}")
+
+try:
+    from .pose_estimator import PoseEstimator as _PoseEstimator, _MP_AVAILABLE
+except ImportError as e:
+    logger.warning(f"姿态估计模块导入失败: {e}")
 
 _DLIB_3D_MODEL_POINTS = np.array([
     (0.0, 0.0, 0.0),
@@ -26,27 +45,25 @@ class VisionManager:
     """视觉模块统一管理器"""
 
     def __init__(self):
-        self.preprocessor = ImagePreprocessor()
+        self.preprocessor = _ImagePreprocessor() if _ImagePreprocessor else None
         self.face_detector = None
         self.pose_estimator = None
-        self.focus_scorer = FocusScorer()
+        self.focus_scorer = _FocusScorer() if _FocusScorer else None
         self._vision_available = False
 
-        try:
-            from .face_detector import FaceDetector, _DLIB_AVAILABLE
-            if _DLIB_AVAILABLE:
-                self.face_detector = FaceDetector()
+        if _FaceDetector and _DLIB_AVAILABLE:
+            try:
+                self.face_detector = _FaceDetector()
                 logger.info("人脸检测器初始化成功")
-        except Exception as e:
-            logger.warning(f"人脸检测器初始化失败: {e}")
+            except Exception as e:
+                logger.warning(f"人脸检测器初始化失败: {e}")
 
-        try:
-            from .pose_estimator import PoseEstimator, _MP_AVAILABLE
-            if _MP_AVAILABLE:
-                self.pose_estimator = PoseEstimator()
+        if _PoseEstimator and _MP_AVAILABLE:
+            try:
+                self.pose_estimator = _PoseEstimator()
                 logger.info("姿态估计器初始化成功")
-        except Exception as e:
-            logger.warning(f"姿态估计器初始化失败: {e}，将使用dlib备用方案")
+            except Exception as e:
+                logger.warning(f"姿态估计器初始化失败: {e}，将使用dlib备用方案")
 
         self._vision_available = (self.face_detector is not None)
         if self._vision_available:
@@ -59,7 +76,7 @@ class VisionManager:
 
     def process_frame(self, frame) -> dict:
         """处理单帧图像，返回完整检测结果"""
-        preprocessed = self.preprocessor.preprocess(frame)
+        preprocessed = self.preprocessor.preprocess(frame) if self.preprocessor else frame
 
         face_result = {"face_detected": False, "landmarks_68": None,
                        "ear_left": 0.0, "ear_right": 0.0, "face_rect": None}
@@ -90,13 +107,20 @@ class VisionManager:
                 face_result["face_rect"], preprocessed.shape)
             pose_result["body"] = body_pose
 
-        focus_result = self.focus_scorer.calculate_focus_score(
-            face_result["ear_left"], face_result["ear_right"],
-            head_pose=pose_result["head"] if pose_result["head"]["available"] else None,
-            body_pose=pose_result["body"] if pose_result["body"]["available"] else None,
-            face_rect=face_result["face_rect"],
-            frame_shape=preprocessed.shape,
-        )
+        if self.focus_scorer:
+            focus_result = self.focus_scorer.calculate_focus_score(
+                face_result["ear_left"], face_result["ear_right"],
+                head_pose=pose_result["head"] if pose_result["head"]["available"] else None,
+                body_pose=pose_result["body"] if pose_result["body"]["available"] else None,
+                face_rect=face_result["face_rect"],
+                frame_shape=preprocessed.shape,
+            )
+        else:
+            focus_result = {
+                "score": 0, "label": "未检测", "ear_avg": 0,
+                "eye_score": 0, "head_score": 0, "body_score": 0,
+                "blink_detected": False, "blink_count": 0,
+            }
 
         return {
             "face_detected": face_result["face_detected"],

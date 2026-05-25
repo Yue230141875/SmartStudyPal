@@ -40,7 +40,7 @@
         <button class="ss-ctrl-btn primary" @click="toggleTimer">
           {{ isRunning ? '⏸ 暂停' : '▶ 开始' }}
         </button>
-        <button class="ss-ctrl-btn" @click="resetTimer">↺ 重置</button>
+        <button class="ss-ctrl-btn stop" @click="stopTimer" :disabled="!hasStarted">⏹ 停止</button>
       </div>
 
       <div class="ss-settings">
@@ -86,6 +86,7 @@
 
       <div class="ss-focus-section">
         <FocusDetector
+          ref="compactFocusDetector"
           mode="compact"
           :auto-start="focusAutoStart"
           @score-update="onFocusScoreUpdate"
@@ -102,7 +103,7 @@
 
 <script setup>
 import { ref, computed, watch, onUnmounted, onMounted } from 'vue'
-import { startPomodoro, completePomodoro } from '../api/pomodoro'
+import { startPomodoro, completePomodoro, startSession, endSession } from '../api/pomodoro'
 import { getAmiyaEncouragement, getAmiyaFocusReminder } from '../api/voice'
 import FocusDetector from './FocusDetector.vue'
 import WhiteNoisePlayer from './WhiteNoisePlayer.vue'
@@ -119,6 +120,7 @@ const isRunning = ref(false)
 const taskName = ref('')
 const focusAutoStart = ref(false)
 const isFocusDetecting = ref(false)
+const compactFocusDetector = ref(null)
 
 const workMinutes = ref(25)
 const breakMinutes = ref(5)
@@ -130,6 +132,14 @@ const countdownRemaining = ref(30 * 60)
 const stopwatchElapsed = ref(0)
 const isBreak = ref(false)
 const currentPomodoroId = ref(null)
+const currentSessionId = ref(null)
+const studyStartTime = ref(null)
+
+const hasStarted = computed(() => {
+  if (activeTab.value === 'pomodoro') return pomodoroRemaining.value < workMinutes.value * 60
+  if (activeTab.value === 'countdown') return countdownRemaining.value < countdownMinutes.value * 60
+  return stopwatchElapsed.value > 0
+})
 
 let intervalId = null
 let focusScoreSum = 0
@@ -225,7 +235,13 @@ const timerSubLabel = computed(() => {
 function switchTab(tabId) {
   if (isRunning.value) return
   activeTab.value = tabId
-  if (tabId !== 'focus') resetTimer()
+  if (tabId !== 'focus') {
+    pomodoroRemaining.value = workMinutes.value * 60
+    countdownRemaining.value = countdownMinutes.value * 60
+    stopwatchElapsed.value = 0
+    focusScoreSum = 0
+    focusScoreCount = 0
+  }
 }
 
 function adjustCountdown(delta) {
@@ -243,8 +259,20 @@ function toggleTimer() {
 
 async function startTimer() {
   isRunning.value = true
+  studyStartTime.value = Date.now()
 
   playEncouragement()
+
+  if (compactFocusDetector.value && !isFocusDetecting.value) {
+    compactFocusDetector.value.startDetection()
+  }
+
+  if (!currentSessionId.value) {
+    try {
+      const res = await startSession(1)
+      if (res.success) currentSessionId.value = res.data.session_id
+    } catch { /* ignore */ }
+  }
 
   if (activeTab.value === 'pomodoro' && !isBreak.value && !currentPomodoroId.value) {
     try {
@@ -273,17 +301,35 @@ function pauseTimer() {
   isRunning.value = false
 }
 
-function resetTimer() {
+function stopTimer() {
   clearInterval(intervalId)
   intervalId = null
   isRunning.value = false
+
+  const avgFocus = focusScoreCount > 0 ? Math.round(focusScoreSum / focusScoreCount) : null
+
+  if (currentSessionId.value) {
+    endSession(currentSessionId.value, avgFocus).catch(() => {})
+    currentSessionId.value = null
+  }
+
+  if (currentPomodoroId.value) {
+    const elapsed = workMinutes.value * 60 - pomodoroRemaining.value
+    completePomodoro(currentPomodoroId.value, elapsed, avgFocus).catch(() => {})
+    currentPomodoroId.value = null
+  }
+
+  if (compactFocusDetector.value && isFocusDetecting.value) {
+    compactFocusDetector.value.stopDetection()
+  }
+
   isBreak.value = false
-  currentPomodoroId.value = null
   pomodoroRemaining.value = workMinutes.value * 60
   countdownRemaining.value = countdownMinutes.value * 60
   stopwatchElapsed.value = 0
   focusScoreSum = 0
   focusScoreCount = 0
+  studyStartTime.value = null
 }
 
 function tickPomodoro() {
@@ -387,7 +433,13 @@ onUnmounted(() => {
 function switchToTab(tabId) {
   if (isRunning.value) return
   activeTab.value = tabId
-  if (tabId !== 'focus') resetTimer()
+  if (tabId !== 'focus') {
+    pomodoroRemaining.value = workMinutes.value * 60
+    countdownRemaining.value = countdownMinutes.value * 60
+    stopwatchElapsed.value = 0
+    focusScoreSum = 0
+    focusScoreCount = 0
+  }
 }
 
 defineExpose({ switchToTab })
@@ -497,6 +549,20 @@ defineExpose({ switchToTab })
 .ss-ctrl-btn.primary {
   background: #8b6914;
   color: #fff;
+}
+.ss-ctrl-btn.stop {
+  border-color: #e74c3c;
+  color: #e74c3c;
+}
+.ss-ctrl-btn.stop:hover:not(:disabled) {
+  background: #e74c3c;
+  color: #fff;
+}
+.ss-ctrl-btn.stop:disabled {
+  border-color: #ccc;
+  color: #ccc;
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 .ss-ctrl-btn:hover {
   opacity: 0.85;

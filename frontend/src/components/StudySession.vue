@@ -136,7 +136,7 @@ let intervalId = null
 let focusScoreSum = 0
 let focusScoreCount = 0
 let lastFocusReminderTime = 0
-const FOCUS_REMINDER_COOLDOWN = 60000
+const FOCUS_REMINDER_COOLDOWN = 10000
 let lowScoreStreak = 0
 
 async function playEncouragement() {
@@ -308,30 +308,28 @@ function onFocusScoreUpdate(data) {
   focusScoreCount++
 
   if (data.focusScore < 60) {
-    lowScoreStreak++
-    if (lowScoreStreak >= 3) {
-      const now = Date.now()
-      if (now - lastFocusReminderTime > FOCUS_REMINDER_COOLDOWN) {
-        lastFocusReminderTime = now
-        lowScoreStreak = 0
-        playFocusReminder()
-      }
+    const now = Date.now()
+    if (now - lastFocusReminderTime > FOCUS_REMINDER_COOLDOWN) {
+      lastFocusReminderTime = now
+      console.log('[专注提醒] 分数低于60，触发提醒, score=', data.focusScore)
+      playFocusReminder()
     }
-  } else {
-    lowScoreStreak = 0
   }
 }
 
 async function playFocusReminder() {
   try {
     const res = await getAmiyaFocusReminder()
+    console.log('[专注提醒] API返回:', res)
     if (res.success && res.data?.audio_url) {
       const audio = new Audio(res.data.audio_url)
       const vol = parseInt(localStorage.getItem('amiya_volume') || '80')
       audio.volume = vol / 100
       audio.play().catch(() => {})
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.warn('[专注提醒] 播放失败:', e.message)
+  }
 }
 
 function onDetectionChange(active) {

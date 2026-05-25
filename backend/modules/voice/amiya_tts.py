@@ -29,8 +29,7 @@ class AmiyaTTS:
     采用预合成模式：启动时生成常用语音文件，交互时直接播放缓存。
     """
 
-    MIMO_API_KEY = "sk-cvnq5gxu7iehtpqymqteathbemx4rqh2asfli0lvkhdxmm0j"
-    MIMO_BASE_URL = "https://api.xiaomimimo.com/v1"
+    MIMO_BASE_URL = os.environ.get("MIMO_BASE_URL", "https://api.xiaomimimo.com/v1")
     MIMO_MODEL = "mimo-v2.5-tts-voiceclone"
 
     REFERENCE_VOICE = "Reference.wav"
@@ -128,7 +127,11 @@ class AmiyaTTS:
         logger.info(f"缓存目录: {self.output_dir}")
 
     def _init_client(self):
-        api_key = os.environ.get("MIMO_API_KEY", self.MIMO_API_KEY)
+        api_key = os.environ.get("MIMO_API_KEY")
+        if not api_key:
+            logger.error("MIMO_API_KEY 未设置！请在 .env 文件中配置 MIMO_API_KEY")
+            self._client = None
+            return
         self._client = OpenAI(
             api_key=api_key,
             base_url=self.MIMO_BASE_URL,

@@ -16,7 +16,7 @@
 
     <!-- 专注检测独立页 -->
     <div v-if="activeTab === 'focus'" class="ss-focus-page">
-      <FocusDetector mode="full" />
+      <FocusDetector mode="full" @score-update="onFocusScoreUpdate" />
     </div>
 
     <!-- 计时模式 -->
@@ -101,12 +101,11 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted, onMounted } from 'vue'
 import { startPomodoro, completePomodoro } from '../api/pomodoro'
-import { getAmiyaEncouragement } from '../api/voice'
+import { getAmiyaEncouragement, getAmiyaFocusReminder } from '../api/voice'
 import FocusDetector from './FocusDetector.vue'
 import WhiteNoisePlayer from './WhiteNoisePlayer.vue'
-import { getAmiyaFocusReminder } from '../api/voice'
 
 const tabs = [
   { id: 'pomodoro', name: '番茄钟', icon: '🍅' },
@@ -137,7 +136,31 @@ let focusScoreSum = 0
 let focusScoreCount = 0
 let lastFocusReminderTime = 0
 const FOCUS_REMINDER_COOLDOWN = 10000
-let lowScoreStreak = 0
+const focusReminderAudios = ref([])
+
+onMounted(async () => {
+  try {
+    const res = await getAmiyaFocusReminder()
+    if (res.success && res.data?.audio_url) {
+      focusReminderAudios.value.push(res.data.audio_url)
+    }
+  } catch { /* ignore */ }
+  try {
+    const res2 = await getAmiyaFocusReminder()
+    if (res2.success && res2.data?.audio_url && !focusReminderAudios.value.includes(res2.data.audio_url)) {
+      focusReminderAudios.value.push(res2.data.audio_url)
+    }
+  } catch { /* ignore */ }
+  try {
+    const res3 = await getAmiyaFocusReminder()
+    if (res3.success && res3.data?.audio_url && !focusReminderAudios.value.includes(res3.data.audio_url)) {
+      focusReminderAudios.value.push(res3.data.audio_url)
+    }
+  } catch { /* ignore */ }
+  if (focusReminderAudios.value.length > 0) {
+    console.log('[专注提醒] 预加载完成，缓存', focusReminderAudios.value.length, '条提醒语音')
+  }
+})
 
 async function playEncouragement() {
   try {
@@ -319,6 +342,15 @@ function onFocusScoreUpdate(data) {
 
 async function playFocusReminder() {
   try {
+    if (focusReminderAudios.value.length > 0) {
+      const idx = Math.floor(Math.random() * focusReminderAudios.value.length)
+      const audio = new Audio(focusReminderAudios.value[idx])
+      const vol = parseInt(localStorage.getItem('amiya_volume') || '80')
+      audio.volume = vol / 100
+      audio.play().catch(() => {})
+      console.log('[专注提醒] 播放预缓存语音:', focusReminderAudios.value[idx])
+      return
+    }
     const res = await getAmiyaFocusReminder()
     console.log('[专注提醒] API返回:', res)
     if (res.success && res.data?.audio_url) {

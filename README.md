@@ -151,17 +151,23 @@ npm run dev
 
 打开浏览器访问 http://localhost:5173
 
-### 4. 配置 MiMo VoiceClone（可选）
+### 4. 配置 MiMo VoiceClone（语音合成功能必需）
 
-编辑 [amiya_tts.py](backend/modules/voice/amiya_tts.py) 中的 API 配置：
+项目使用环境变量管理敏感配置，**不要将密钥硬编码到代码中**：
 
-```python
-MIMO_API_KEY = "your-api-key"
-MIMO_BASE_URL = "https://api.mimo.im/v1"
-REFERENCE_AUDIO_PATH = "path/to/Reference.wav"  # 阿米娅参考音频
+```bash
+# 复制模板文件
+cp .env.example .env
+
+# 编辑 .env 文件，填入你的 MiMo API Key
+MIMO_API_KEY=your-mimo-api-key-here
 ```
 
+> **获取 API Key**: 访问 [MiMo 官网](https://api.xiaomimimo.com) 注册并获取密钥
+
 详细配置指南参见 [mimo_voiceclone_trae_guide.md](mimo_voiceclone_trae_guide.md)
+
+> ⚠️ **注意**: `.env` 文件已被 `.gitignore` 忽略，不会被提交到仓库。请妥善保管你的密钥。
 
 ## 核心算法
 
